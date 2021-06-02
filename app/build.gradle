@@ -20,17 +20,28 @@ android {
                 cppFlags ""
             }
         }
+        ndk{
+            abiFilters "armeabi-v7a"
+        }
     }
 
+    ndkVersion '22.0.7026061'
+
     buildTypes {
+        debug {
+            //应用图标、名称
+            manifestPlaceholders = [app_icon:"@mipmap/ic_launcher_pre", app_name:"@string/app_name"]
+        }
         release {
+            //应用图标、名称
+            manifestPlaceholders = [app_icon:"@mipmap/ic_launcher_pre", app_name:"@string/app_name"]
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     externalNativeBuild {
         cmake {
-            path "src/main/cpp/CMakeLists.txt"
+            path "CMakeLists.txt"
             version "3.10.2"
         }
     }
