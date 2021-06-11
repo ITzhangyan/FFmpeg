@@ -2,12 +2,14 @@
 cmake_minimum_required(VERSION 3.10.2)
 #file表示文件操作，使用相对路径，添加该路径下的所有以.cpp结尾的文件
 file(GLOB SOURCE src/main/cpp/*.cpp)
-#编译或者是添加一个动态库，名字是ffmpegplayer，源文件是src/main/cpp/*.cpp
+#编译或者是添加一个动态库，名字是wanavpalyer，源文件是src/main/cpp/*.cpp
+#SHARED 表示生成动态库或共享库  STATIC 表示生成静态库
 add_library( # Sets the name of the library.
         wanavpalyer
         SHARED
         ${SOURCE})
-#找到编译库 log-lib 并连接到我们的动态库native-lib中
+#查找到指定的预编译库，并将它的路径存储在变量中。
+#默认的搜索路径为 cmake 包含的系统库，因此如果是 NDK 的公共库只需要指定库的 name 即可。
 #此处的log库是我们后面调试时需要用来打log日志的库
 find_library( # Sets the name of the path variable.
         log-lib
