@@ -26,9 +26,18 @@ class MainActivity : AppCompatActivity() {
         wangyiPlayer!!.setSurfaceView(surfaceView!!)
     }
     fun open(view: View?) {
-        Log.e("====", "open: ${Environment.getExternalStorageDirectory()}", )
+        Log.e("====", "open: ${Environment.getExternalStorageDirectory()}")
 
         val file = File(Environment.getExternalStorageDirectory(), "input.mp4")
         wangyiPlayer?.start(file.absolutePath)
+    }
+
+    /**
+     * 播放 ffplay -ar 44100 -ac 2 -f s16le -i output.pcm
+     */
+    fun openAudio(view: View) {
+        val input = File(Environment.getExternalStorageDirectory(), "input.mp3").absolutePath
+        val output = File(Environment.getExternalStorageDirectory(), "output.pcm").absolutePath
+        wangyiPlayer?.startAudio(input, output)
     }
 }
