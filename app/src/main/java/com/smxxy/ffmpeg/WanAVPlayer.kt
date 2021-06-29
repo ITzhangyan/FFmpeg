@@ -50,5 +50,13 @@ class WanAVPlayer : SurfaceHolder.Callback {
     override fun surfaceDestroyed(p0: SurfaceHolder) {
     }
 
+    fun startAudio(input:String, output:String){
+        sound(input,output)
+    }
+
+    private external fun sound(input:String, output:String)
+
+
+
 
 }

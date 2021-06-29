@@ -2,13 +2,26 @@
 #include <string>
 #include <android/native_window_jni.h>
 #include <zconf.h>
+#include <android/log.h>
+#define LOGI(FORMAT,...) __android_log_print(ANDROID_LOG_INFO,"wanAV",FORMAT,##__VA_ARGS__);
+#define LOGE(FORMAT,...) __android_log_print(ANDROID_LOG_ERROR,"wanAV",FORMAT,##__VA_ARGS__);
+#define MAX_AUDIO_FRME_SIZE 48000 * 4
+
 
 extern "C" {
+//封装格式
+#include "libavformat/avformat.h"
+//解码
 #include "libavcodec/avcodec.h"
+//缩放
 #include <libswscale/swscale.h>
+//图片
 #include <libavutil/imgutils.h>
-#include <libavformat/avformat.h>
+//重采样
+#include "libswresample/swresample.h"
+
 }
+
 extern "C" JNIEXPORT jstring  JNICALL
 Java_com_smxxy_ffmpeg_MainActivity_stringFromJNI(
         JNIEnv *env,
@@ -49,7 +62,8 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
     //读取媒体文件的数据包以获得流信息
     avformat_find_stream_info(avFormatContext, nullptr);
 
-    //视频时长 （单位：微秒us，转换为秒需要除以1000000）nb_streams表示视频中有几种流
+    //nb_streams表示视频中有几种流
+    //通过遍历所有的流 并判断流的类型可以寻找到视频流的位置
     int video_stream_idx = -1;
     for (int i = 0; i < avFormatContext->nb_streams; ++i) {
         if (avFormatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -61,16 +75,21 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
         printf("Couldn't find a video stream\n");
         return;
     }
-
+    //拿到对应视频流的参数
     AVCodecParameters *codecpar = avFormatContext->streams[video_stream_idx]->codecpar;
 
     //找到解码器
     AVCodec *dec = avcodec_find_decoder(codecpar->codec_id);
-    //创建上下文
+    //创建一个解码器上下文对象
     AVCodecContext *codecContext = avcodec_alloc_context3(dec);
-    //根据提供的编解码器的值填充编解码器上下文
+    if (codecContext == nullptr) {
+        //创建解码器上下文失败
+        LOGE("创建解码器上下文失败");
+        return;
+    }
+    //根据提供的编解码器的值填充编解码器上下文 将 codecpar 转成 AVCodecContext
     avcodec_parameters_to_context(codecContext, codecpar);
-    //打开解码器
+    //打开编解码器
     avcodec_open2(codecContext, dec, nullptr);
 
     //读取包 packet AVPacket：存储压缩数据（视频对应H.264等码流数据，音频对应AAC/MP3等码流数据）
@@ -125,9 +144,10 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
         }
         uint8_t *dst_data[0];
         int dst_linesize[0];
+        //按照指定的宽、高、像素格式来分析图像内存
         av_image_alloc(dst_data, dst_linesize,
                        codecContext->width, codecContext->height, AV_PIX_FMT_RGBA, 1);
-
+        //判断 如果是视频压缩数据 (通过判断视频流的索引位置)
         if (packet->stream_index == video_stream_idx) {
             //非零   正在解码
             if (ret == 0) {
@@ -163,4 +183,120 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
     env->ReleaseStringUTFChars(path_, path);
 
 
+}
+
+//音频
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_smxxy_ffmpeg_WanAVPlayer_sound(JNIEnv *env, jobject thiz, jstring input_, jstring output_) {
+    //将Java的String转为C的字符串
+    const char *input = env -> GetStringUTFChars(input_,0);
+    const char *output = env -> GetStringUTFChars(output_,0);
+
+    avformat_network_init();
+
+   AVFormatContext *avFormatContext = avformat_alloc_context();
+
+   //打开音频文件
+   if (avformat_open_input(&avFormatContext,input, nullptr, nullptr) != 0){
+       LOGI("%s","无法获取输入文件信息");
+       return;
+   }
+
+   if (avformat_find_stream_info(avFormatContext, nullptr) < 0){
+       LOGI("%s","无法获取输入文件信息");
+       return;
+   }
+
+    //nb_streams表示视频中有几种流
+    //通过遍历所有的流 并判断流的类型可以寻找到视频流的位置
+    int audio_stream_idx=-1;
+    for (int i = 0; i < avFormatContext->nb_streams; ++i) {
+        if (avFormatContext -> streams[i] -> codecpar -> codec_type == AVMEDIA_TYPE_AUDIO){
+            audio_stream_idx = i;
+            break;
+        }
+    }
+    // 拿到对应音频流的参数
+    AVCodecParameters *codecpar = avFormatContext -> streams[audio_stream_idx] -> codecpar;
+
+    //找到解码器
+    AVCodec *dec =  avcodec_find_decoder(codecpar -> codec_id);
+    // 创建一个解码器上下文对象
+    AVCodecContext *codecContext = avcodec_alloc_context3(dec);
+    if (codecContext == nullptr) {
+        //创建解码器上下文失败
+        LOGE("创建解码器上下文失败");
+        return;
+    }
+    //根据提供的编解码器的值填充编解码器上下文 将 codecpar 转成 AVCodecContext
+    avcodec_parameters_to_context(codecContext, codecpar);
+
+    //打开编解码器
+    avcodec_open2(codecContext, dec, nullptr);
+    //创建swrcontext上下文件
+    SwrContext *swrContext = swr_alloc();
+    //音频格式  输入的采样设置参数
+    AVSampleFormat in_sample = codecContext -> sample_fmt;
+    // 输入采样率
+    int in_sample_rate = codecContext->sample_rate;
+    // 输入声道布局
+    uint64_t in_ch_layout=codecContext->channel_layout;
+
+    //输出参数  固定
+    //输出采样格式
+    AVSampleFormat out_sample=AV_SAMPLE_FMT_S16;
+    //输出采样
+    int out_sample_rate=44100;
+    //输出声道布局
+    uint64_t out_ch_layout = AV_CH_LAYOUT_STEREO;
+    //设置转换器 的输入参数 和输出参数 给Swrcontext 分配空间，设置公共参数
+    swr_alloc_set_opts(swrContext,out_ch_layout,out_sample,out_sample_rate
+            ,in_ch_layout,in_sample,in_sample_rate,0,nullptr);
+    //初始化转换器其他的默认参数
+    swr_init(swrContext);
+    //设置音频缓冲区间 16bit   44100  PCM数据, 双声道
+    uint8_t *out_buffer = (uint8_t *)(av_malloc(2 * 44100));
+
+    // 创建pcm的文件对象
+    FILE *fp_pcm = fopen(output, "wb");
+    //读取包 packet AVPacket：存储压缩数据（视频对应H.264等码流数据，音频对应AAC/MP3等码流数据）
+    AVPacket *packet = av_packet_alloc();
+    //开始读取源文件，进行解码
+    while (av_read_frame(avFormatContext, packet)>=0) {
+        avcodec_send_packet(codecContext, packet);
+        //解压缩数据  未压缩
+        AVFrame *frame = av_frame_alloc();
+        //解码
+        int ret = avcodec_receive_frame(codecContext, frame);
+        //frame
+        if (ret == AVERROR(EAGAIN))
+            continue;
+        else if (ret < 0) {
+            LOGE("解码完成");
+            break;
+        }
+        if (packet->stream_index!= audio_stream_idx) {
+            continue;
+        }
+        //frame  ---->统一的格式
+        //将每一帧数据转换成pcm
+        swr_convert(swrContext, &out_buffer, 2 * 44100,
+                    (const uint8_t **)frame->data, frame->nb_samples);
+        int out_channerl_nb= av_get_channel_layout_nb_channels(out_ch_layout);
+        // //获取实际的缓存大小
+        int out_buffer_size=  av_samples_get_buffer_size(nullptr, out_channerl_nb, frame->nb_samples, out_sample, 1);
+        // 写入文件
+        fwrite(out_buffer,1,out_buffer_size,fp_pcm);
+    }
+
+
+    //释放
+    fclose(fp_pcm);
+    av_free(out_buffer);
+    swr_free(&swrContext);
+    avcodec_close(codecContext);
+    avformat_close_input(&avFormatContext);
+    env->ReleaseStringUTFChars(input_, input);
+    env->ReleaseStringUTFChars(output_, output);
 }
