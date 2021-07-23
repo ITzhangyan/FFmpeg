@@ -51,7 +51,6 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
     // av_find_input_format("avi")
 
 
-
     // 打开多媒体数据并且获得一些相关的信息 ret为零 表示成功
     //参数一：函数调用成功之后处理过的AVFormatContext结构体
     //参数二：打开的音视频流的URL
@@ -63,7 +62,7 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
     avformat_find_stream_info(avFormatContext, nullptr);
 
     //nb_streams表示视频中有几种流
-    //通过遍历所有的流 并判断流的类型可以寻找到视频流的位置
+    //通过遍历所有的流 并判断流的类型可以寻找到视频流的位置,表示通过流找到解码器，通过解码器找到解码类型为视频
     int video_stream_idx = -1;
     for (int i = 0; i < avFormatContext->nb_streams; ++i) {
         if (avFormatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -75,7 +74,7 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
         printf("Couldn't find a video stream\n");
         return;
     }
-    //拿到对应视频流的参数
+    //通过索引拿到视频流的解码参数
     AVCodecParameters *codecpar = avFormatContext->streams[video_stream_idx]->codecpar;
 
     //找到解码器
@@ -88,11 +87,14 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
         return;
     }
     //根据提供的编解码器的值填充编解码器上下文 将 codecpar 转成 AVCodecContext
+    //实际上就是将解码器的参数 copy 到我们解码器上下文
     avcodec_parameters_to_context(codecContext, codecpar);
     //打开编解码器
     avcodec_open2(codecContext, dec, nullptr);
 
-    //读取包 packet AVPacket：存储压缩数据（视频对应H.264等码流数据，音频对应AAC/MP3等码流数据）
+    //从一个视频流中读取数据包 packet AVPacket：存储压缩数据（视频对应H.264等码流数据，音频对应AAC/MP3等码流数据）
+    //一个视频由很多帧很多帧组成，可以把AVpacket理解成一帧的概念。
+    //但是这个一帧是被压缩了的，解码器之前我们拿到的是AVpacket，解码之后拿到的是AVframe
     AVPacket *packet = av_packet_alloc();
 
     //处理像素数据
@@ -125,15 +127,17 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
 
     //视频缓冲区
     ANativeWindow_Buffer outBuffer;
-    int frameCount = 0;
 
     //创建新的窗口用于视频显示
     ANativeWindow_setBuffersGeometry(nativeWindow, codecContext->width,
                                      codecContext->height,
                                      WINDOW_FORMAT_RGBA_8888);
-
+    //通过 av_read_frame 函数，把实例化的 packet 作为参数传进去，源源不断的从视频流里面取得压缩数据，
+    //通过解码器解压成frame，但是解压之前要把 packet 取出来。
     while (av_read_frame(avFormatContext, packet) >= 0) {
+        //取出来给解码器
         avcodec_send_packet(codecContext, packet);
+        //package解码成frame
         AVFrame *frame = av_frame_alloc();
         ret = avcodec_receive_frame(codecContext, frame);
         if (ret == AVERROR(EAGAIN)) {
@@ -153,9 +157,9 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
             if (ret == 0) {
                 //  绘制之前   配置一些信息  比如宽高   格式
 
-                // 绘制
+                // 绘制的时候先上锁，防止这一帧还没渲染完成，下一帧又来渲染了
                 ANativeWindow_lock(nativeWindow, &outBuffer, NULL);
-                // h 264   ----yuv   RGBA
+                // h 264   ----yuv
                 //转为指定的YUV420P
                 sws_scale(sws_ctx,
                           reinterpret_cast<const uint8_t *const *>(frame->data), frame->linesize, 0,
@@ -169,10 +173,14 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
                 int src_linesize = dst_linesize[0];
                 uint8_t *firstWindown = static_cast<uint8_t *>(outBuffer.bits);
                 for (int i = 0; i < outBuffer.height; ++i) {
+                    // 参数一-- 指向用于存储复制内容的目标数组
+                    // 参数二-- 指向要复制的数据源
+                    // 参数三-- 要被复制的字节数。
                     memcpy(firstWindown + i * destStride, src_data + i * src_linesize, destStride);
                 }
                 ANativeWindow_unlockAndPost(nativeWindow);
                 usleep(1000 * 16);
+                //销毁
                 av_frame_free(&frame);
             }
         }
