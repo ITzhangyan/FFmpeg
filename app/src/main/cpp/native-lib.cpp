@@ -3,8 +3,9 @@
 #include <android/native_window_jni.h>
 #include <zconf.h>
 #include <android/log.h>
-#define LOGI(FORMAT,...) __android_log_print(ANDROID_LOG_INFO,"wanAV",FORMAT,##__VA_ARGS__);
-#define LOGE(FORMAT,...) __android_log_print(ANDROID_LOG_ERROR,"wanAV",FORMAT,##__VA_ARGS__);
+
+#define LOGI(FORMAT, ...) __android_log_print(ANDROID_LOG_INFO,"wanAV",FORMAT,##__VA_ARGS__);
+#define LOGE(FORMAT, ...) __android_log_print(ANDROID_LOG_ERROR,"wanAV",FORMAT,##__VA_ARGS__);
 #define MAX_AUDIO_FRME_SIZE 48000 * 4
 
 
@@ -83,7 +84,7 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
     AVCodecContext *codecContext = avcodec_alloc_context3(dec);
     if (codecContext == nullptr) {
         //创建解码器上下文失败
-        LOGE("创建解码器上下文失败");
+        LOGE("创建解码器上下文失败")
         return;
     }
     //根据提供的编解码器的值填充编解码器上下文 将 codecpar 转成 AVCodecContext
@@ -193,43 +194,47 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_avPlayer(JNIEnv *env, jobject instance, jstrin
 
 }
 
-//音频
+/**
+* 音频
+* 播放 ffplay -ar 44100 -ac 2 -f s16le -i output.pcm
+*/
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_smxxy_ffmpeg_WanAVPlayer_sound(JNIEnv *env, jobject thiz, jstring input_, jstring output_) {
+Java_com_smxxy_ffmpeg_WanAVPlayer_sound(JNIEnv *env, jobject thiz, jstring input_,
+                                        jstring output_) {
     //将Java的String转为C的字符串
-    const char *input = env -> GetStringUTFChars(input_,0);
-    const char *output = env -> GetStringUTFChars(output_,0);
+    const char *input = env->GetStringUTFChars(input_, 0);
+    const char *output = env->GetStringUTFChars(output_, 0);
 
     avformat_network_init();
 
-   AVFormatContext *avFormatContext = avformat_alloc_context();
+    AVFormatContext *avFormatContext = avformat_alloc_context();
 
-   //打开音频文件
-   if (avformat_open_input(&avFormatContext,input, nullptr, nullptr) != 0){
-       LOGI("%s","无法获取输入文件信息");
-       return;
-   }
+    //打开音频文件
+    if (avformat_open_input(&avFormatContext, input, nullptr, nullptr) != 0) {
+        LOGI("%s", "无法获取输入文件信息");
+        return;
+    }
 
-   if (avformat_find_stream_info(avFormatContext, nullptr) < 0){
-       LOGI("%s","无法获取输入文件信息");
-       return;
-   }
+    if (avformat_find_stream_info(avFormatContext, nullptr) < 0) {
+        LOGI("%s", "无法获取输入文件信息");
+        return;
+    }
 
     //nb_streams表示视频中有几种流
     //通过遍历所有的流 并判断流的类型可以寻找到视频流的位置
-    int audio_stream_idx=-1;
+    int audio_stream_idx = -1;
     for (int i = 0; i < avFormatContext->nb_streams; ++i) {
-        if (avFormatContext -> streams[i] -> codecpar -> codec_type == AVMEDIA_TYPE_AUDIO){
+        if (avFormatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             audio_stream_idx = i;
             break;
         }
     }
     // 拿到对应音频流的参数
-    AVCodecParameters *codecpar = avFormatContext -> streams[audio_stream_idx] -> codecpar;
+    AVCodecParameters *codecpar = avFormatContext->streams[audio_stream_idx]->codecpar;
 
     //找到解码器
-    AVCodec *dec =  avcodec_find_decoder(codecpar -> codec_id);
+    AVCodec *dec = avcodec_find_decoder(codecpar->codec_id);
     // 创建一个解码器上下文对象
     AVCodecContext *codecContext = avcodec_alloc_context3(dec);
     if (codecContext == nullptr) {
@@ -245,33 +250,33 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_sound(JNIEnv *env, jobject thiz, jstring input
     //创建swrcontext上下文件
     SwrContext *swrContext = swr_alloc();
     //音频格式  输入的采样设置参数
-    AVSampleFormat in_sample = codecContext -> sample_fmt;
+    AVSampleFormat in_sample = codecContext->sample_fmt;
     // 输入采样率
     int in_sample_rate = codecContext->sample_rate;
     // 输入声道布局
-    uint64_t in_ch_layout=codecContext->channel_layout;
+    uint64_t in_ch_layout = codecContext->channel_layout;
 
     //输出参数  固定
     //输出采样格式
-    AVSampleFormat out_sample=AV_SAMPLE_FMT_S16;
+    AVSampleFormat out_sample = AV_SAMPLE_FMT_S16;
     //输出采样
-    int out_sample_rate=44100;
+    int out_sample_rate = 44100;
     //输出声道布局
     uint64_t out_ch_layout = AV_CH_LAYOUT_STEREO;
     //设置转换器 的输入参数 和输出参数 给Swrcontext 分配空间，设置公共参数
-    swr_alloc_set_opts(swrContext,out_ch_layout,out_sample,out_sample_rate
-            ,in_ch_layout,in_sample,in_sample_rate,0,nullptr);
+    swr_alloc_set_opts(swrContext, out_ch_layout, out_sample, out_sample_rate, in_ch_layout,
+                       in_sample, in_sample_rate, 0, nullptr);
     //初始化转换器其他的默认参数
     swr_init(swrContext);
     //设置音频缓冲区间 16bit   44100  PCM数据, 双声道
-    uint8_t *out_buffer = (uint8_t *)(av_malloc(2 * 44100));
+    uint8_t *out_buffer = (uint8_t *) (av_malloc(2 * 44100));
 
     // 创建pcm的文件对象
     FILE *fp_pcm = fopen(output, "wb");
     //读取包 packet AVPacket：存储压缩数据（视频对应H.264等码流数据，音频对应AAC/MP3等码流数据）
     AVPacket *packet = av_packet_alloc();
     //开始读取源文件，进行解码
-    while (av_read_frame(avFormatContext, packet)>=0) {
+    while (av_read_frame(avFormatContext, packet) >= 0) {
         avcodec_send_packet(codecContext, packet);
         //解压缩数据  未压缩
         AVFrame *frame = av_frame_alloc();
@@ -284,18 +289,19 @@ Java_com_smxxy_ffmpeg_WanAVPlayer_sound(JNIEnv *env, jobject thiz, jstring input
             LOGE("解码完成");
             break;
         }
-        if (packet->stream_index!= audio_stream_idx) {
+        if (packet->stream_index != audio_stream_idx) {
             continue;
         }
         //frame  ---->统一的格式
         //将每一帧数据转换成pcm
         swr_convert(swrContext, &out_buffer, 2 * 44100,
-                    (const uint8_t **)frame->data, frame->nb_samples);
-        int out_channerl_nb= av_get_channel_layout_nb_channels(out_ch_layout);
+                    (const uint8_t **) frame->data, frame->nb_samples);
+        int out_channerl_nb = av_get_channel_layout_nb_channels(out_ch_layout);
         // //获取实际的缓存大小
-        int out_buffer_size=  av_samples_get_buffer_size(nullptr, out_channerl_nb, frame->nb_samples, out_sample, 1);
+        int out_buffer_size = av_samples_get_buffer_size(nullptr, out_channerl_nb,
+                                                         frame->nb_samples, out_sample, 1);
         // 写入文件
-        fwrite(out_buffer,1,out_buffer_size,fp_pcm);
+        fwrite(out_buffer, 1, out_buffer_size, fp_pcm);
     }
 
 
